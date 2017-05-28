@@ -117,7 +117,7 @@ int main() {
           // the vehicle (which is at x,y = 0).
           double cte = polyeval(coeffs, 0);
           // psi error is the arctan(f'(x)) where f' is the deriviative of the polynomial
-          // we fir to the waypoints, i.e. c2 + 2 * c3 * x. Note that x is zero for
+          // we fit to the waypoints, i.e. c2 + 2 * c3 * x + 3 * c4 * x * x. Note that x is zero for
           // local coordinate.
           double epsi = -atan(coeffs[1]);
 
