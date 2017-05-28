@@ -42,7 +42,8 @@ class FG_eval {
 MPC::MPC() {}
 MPC::~MPC() {}
 
-vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
+vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
+                          vector<double>* mpc_xs, vector<double>* mpc_ys) {
   bool ok = true;
   size_t i;
   typedef CPPAD_TESTVECTOR(double) Dvector;
@@ -52,7 +53,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // element vector and there are 10 timesteps. The number of variables is:
   //
   // 4 * 10 + 2 * 9
-  size_t n_vars = 0;
+  size_t n_vars = state.size() * N + 2 * (N - 1);
   // TODO: Set the number of constraints
   size_t n_constraints = 0;
 
@@ -117,5 +118,5 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   //
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
-  return {};
+  return {0, 0};
 }

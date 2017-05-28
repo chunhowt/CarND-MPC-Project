@@ -65,6 +65,7 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+
 int main() {
   uWS::Hub h;
 
@@ -87,30 +88,60 @@ int main() {
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
+          assert(ptsx.size() == ptsy.size());
+
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
 
-          /*
-          * TODO: Calculate steeering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
-          double steer_value;
-          double throttle_value;
+          // Step 1. we need to convert the waypoints from global to local vehicle
+          // coordinate.
+          // This is done by translating the waypoint global coordinate ptsx or ptsy
+          // to vehicle coordinate (i.e. global x,y - local x,y) then rotating to
+          // the car's orientation (-phi).
+          // Based on https://en.wikipedia.org/wiki/Rotation_matrix the matrix should
+          // be [cos(theta), sin(theta); -sin(theta), cos(theta)].
+          Eigen::VectorXd xvals(ptsx.size());
+          Eigen::VectorXd yvals(ptsy.size());
+          for (int i = 0; i < ptsx.size(); ++i) {
+            xvals[i] = cos(psi) * (ptsx[i] - px) + sin(psi) * (ptsy[i] - py);
+            yvals[i] = -sin(psi) * (ptsx[i] - px) + cos(psi) * (ptsy[i] - py);
+          }
+
+          // Once we have the transformed waypoints, we fit an order 3 polynomial.
+          Eigen::VectorXd coeffs = polyfit(xvals, yvals, 3);
+
+          // We also need the cross track error and psi error.
+          // Cross-track error is essentially the gap between the trajectory and
+          // the vehicle (which is at x,y = 0).
+          double cte = polyeval(coeffs, 0);
+          // psi error is the arctan(f'(x)) where f' is the deriviative of the polynomial
+          // we fir to the waypoints, i.e. c2 + 2 * c3 * x. Note that x is zero for
+          // local coordinate.
+          double epsi = -atan(coeffs[1]);
+
+          // Step 2: we solve the states and obtain the actuator values.
+          // Note that in vehicle coordinate, x, y and psi will all be zero.
+          Eigen::VectorXd state(6);
+          state << 0, 0, 0, v, cte, epsi;
+
+          vector<double> mpc_x_vals;
+          vector<double> mpc_y_vals;
+          vector<double> actuators = mpc.Solve(state, coeffs, &mpc_x_vals, &mpc_y_vals);
+
+          double steer_value = actuators[0];
+          double throttle_value = actuators[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value / deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          // Step 3: visualize the predicted and desired trajector.
 
+          //Display the MPC predicted trajectory 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
@@ -120,7 +151,10 @@ int main() {
           //Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-
+          for (int i = 0; i < xvals.size(); ++i) {
+            next_x_vals.push_back(xvals[i]);
+            next_y_vals.push_back(yvals[i]);
+          }
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
