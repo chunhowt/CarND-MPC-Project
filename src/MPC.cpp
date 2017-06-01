@@ -25,7 +25,7 @@ const int STEERING_START = EPSI_START + N;
 const int THROTTLE_START = STEERING_START + N - 1;
 
 // Corresponding to 25 degrees, as mentioned for this project.
-const double MAX_STEERING_RADS = 0.44;
+const double MAX_STEERING_RADS = 0.43633;
 
 const double IDEAL_SPEED = 50;
 
@@ -63,9 +63,15 @@ class FG_eval {
       fg[0] += CppAD::pow(vars[V_START + i] - IDEAL_SPEED, 2); 
     }
 
+    // Regularize the use of actuators.
+    for (int i = 0; i < N - 1; ++i) {
+      fg[0] += 10 * CppAD::pow(vars[STEERING_START + i], 2);
+      fg[0] += 10 * CppAD::pow(vars[THROTTLE_START + i], 2);
+    }
+
     // Minimize the change in actuator value to smooth the driving.
     for (int i = 0; i < N - 2; ++i) {
-      fg[0] += CppAD::pow(vars[STEERING_START + i + 1] - vars[STEERING_START + i], 2);
+      fg[0] += 1000 * CppAD::pow(vars[STEERING_START + i + 1] - vars[STEERING_START + i], 2);
       fg[0] += CppAD::pow(vars[THROTTLE_START + i + 1] - vars[THROTTLE_START + i], 2);
     }
 
@@ -83,7 +89,7 @@ class FG_eval {
     fg[1 + EPSI_START] = vars[EPSI_START];
 
     // The rest of the constraints
-    for (int i = 0; i < N - 1; i++) {
+    for (int i = 0; i < N - 1; ++i) {
       // The state at time t+1 .
       AD<double> x1 = vars[X_START + i + 1];
       AD<double> y1 = vars[Y_START + i + 1];
@@ -115,8 +121,6 @@ class FG_eval {
       fg[1 + V_START + i + 1] = v1 - (v0 + curr_throttle * dt);
 
       // and the cross track / orientation error.
-      // cte[t+1] = f(x[t]) - y[t] + v[t] * sin(epsi[t]) * dt
-      // epsi[t+1] = psi[t] - psides[t] + v[t] * delta[t] / Lf * dt
       fg[1 + CTE_START + i + 1] = cte1 - ((cte_f - y0) + (v0 * CppAD::sin(epsi0) * dt));
       fg[1 + EPSI_START + i + 1] = epsi1 - ((psi0 - epsi_f) + v0 * curr_steering / Lf * dt);
     }
@@ -143,7 +147,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
   // Initial value of the independent variables.
   // SHOULD BE 0 besides initial state.
   Dvector vars(n_vars);
-  for (int i = 0; i < n_vars; i++) {
+  for (int i = 0; i < n_vars; ++i) {
     vars[i] = 0;
   }
   vars[X_START] = state[0];
@@ -156,10 +160,12 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
   Dvector vars_lowerbound(n_vars);
   Dvector vars_upperbound(n_vars);
   // Set lower and upper limits for variables.
-  // For state values, it can be +/- infinity.
+  // For state values, it can be +/- infinity, but if we use
+  // std::numeric_limits<double>::min(), it seems to fail to converge.
+  // So, here we pick some smaller limit instead.
   for (int i = 0; i < STEERING_START; ++i) {
-    vars_lowerbound[i] = std::numeric_limits<double>::min();
-    vars_upperbound[i] = std::numeric_limits<double>::max();
+    vars_lowerbound[i] = -1.0e30;
+    vars_upperbound[i] = 1.0e30;
   }
   // Set the limit for steering actuator.
   for (int i = STEERING_START; i < THROTTLE_START; ++i) {
@@ -176,17 +182,23 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
   // Should be 0 besides initial state.
   Dvector constraints_lowerbound(n_constraints);
   Dvector constraints_upperbound(n_constraints);
-  for (int i = 0; i < n_constraints; i++) {
+  for (int i = 0; i < n_constraints; ++i) {
     constraints_lowerbound[i] = 0;
     constraints_upperbound[i] = 0;
   }
   // Set initial state as constraints.
-  constraints_lowerbound[X_START] = constraints_upperbound[X_START] = state[0];
-  constraints_lowerbound[Y_START] = constraints_upperbound[Y_START] = state[1];
-  constraints_lowerbound[PHI_START] = constraints_upperbound[PHI_START] = state[2];
-  constraints_lowerbound[V_START] = constraints_upperbound[V_START] = state[3];
-  constraints_lowerbound[CTE_START] = constraints_upperbound[CTE_START] = state[4];
-  constraints_lowerbound[EPSI_START] = constraints_upperbound[EPSI_START] = state[5];
+  constraints_lowerbound[X_START] = state[0];
+  constraints_upperbound[X_START] = state[0];
+  constraints_lowerbound[Y_START] = state[1];
+  constraints_upperbound[Y_START] = state[1];
+  constraints_lowerbound[PHI_START] = state[2];
+  constraints_upperbound[PHI_START] = state[2];
+  constraints_lowerbound[V_START] = state[3];
+  constraints_upperbound[V_START] = state[3];
+  constraints_lowerbound[CTE_START] = state[4];
+  constraints_upperbound[CTE_START] = state[4];
+  constraints_lowerbound[EPSI_START] = state[5];
+  constraints_upperbound[EPSI_START] = state[5];
 
   // object that computes objective and constraints
   FG_eval fg_eval(coeffs);
@@ -219,15 +231,16 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
 
   // Check some of the solution values
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
+  cout << "Ok: " << ok << endl;
 
   // Cost
   auto cost = solution.obj_value;
   std::cout << "Cost " << cost << std::endl;
 
   // Save the predicted trajectory and pass them out.
-  for (int i = 0; i < N; ++i) {
+  for (int i = 0; i < N - 1; ++i) {
     mpc_xs->push_back(solution.x[X_START + i]);
     mpc_ys->push_back(solution.x[Y_START + i]);
   }
-  return {solution.x[STEERING_START + 1], solution.x[THROTTLE_START + 1]};
+  return {solution.x[STEERING_START], solution.x[THROTTLE_START]};
 }
