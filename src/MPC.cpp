@@ -7,8 +7,9 @@
 
 using CppAD::AD;
 
-size_t N = 10;
-double dt = 0.1;  // 100 ms.
+size_t N = 16;
+double dt = 0.05;  // 50 ms.
+int latency_ind = int(0.1 / dt);
 
 // FG_eval takes in a single vector of all the states and actuator values over
 // all the time period. Thus, we flatten these values into a 1-D vector and
@@ -164,8 +165,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
   // std::numeric_limits<double>::min(), it seems to fail to converge.
   // So, here we pick some smaller limit instead.
   for (int i = 0; i < STEERING_START; ++i) {
-    vars_lowerbound[i] = -1.0e30;
-    vars_upperbound[i] = 1.0e30;
+    vars_lowerbound[i] = -1.0e10;
+    vars_upperbound[i] = 1.0e10;
   }
   // Set the limit for steering actuator.
   for (int i = STEERING_START; i < THROTTLE_START; ++i) {
@@ -242,5 +243,6 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs,
     mpc_xs->push_back(solution.x[X_START + i]);
     mpc_ys->push_back(solution.x[Y_START + i]);
   }
-  return {solution.x[STEERING_START], solution.x[THROTTLE_START]};
+  return {solution.x[STEERING_START + latency_ind],
+          solution.x[THROTTLE_START + latency_ind]};
 }
